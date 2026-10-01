@@ -20,6 +20,8 @@ var (
 	ErrLeaseExpired          = errors.New("lease expired")
 	ErrDuplicateWaiter       = errors.New("duplicate waiter")
 	ErrDuplicateHold         = errors.New("duplicate hold")
+	ErrResourceNotFound      = errors.New("resource not found")
+	ErrNotWaiting            = errors.New("not waiting")
 
 	InvalidLeaseDurationError  = ErrInvalidLeaseDuration
 	InvalidReentryCountError   = ErrInvalidReentryCount
@@ -29,4 +31,6 @@ var (
 	LeaseExpiredError          = ErrLeaseExpired
 	DuplicateWaiterError       = ErrDuplicateWaiter
 	DuplicateHoldError         = ErrDuplicateHold
+	ResourceNotFoundError      = ErrResourceNotFound
+	NotWaitingError            = ErrNotWaiting
 )

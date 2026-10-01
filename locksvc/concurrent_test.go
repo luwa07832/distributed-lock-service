@@ -1,8 +1,10 @@
 package locksvc
 
 import (
+	"errors"
 	"sync"
 	"testing"
+	"time"
 )
 
 func TestConcurrentAcquireProducesSingleHolderAndFifoQueue(t *testing.T) {
@@ -71,5 +73,56 @@ func TestRepeatedReleaseEventuallyFreesResource(t *testing.T) {
 	}
 	if final.State.Exists {
 		t.Fatalf("resource still exists: %+v", final.State)
+	}
+}
+
+func TestConcurrentCancelVersusExpiryTransferIsDeterministic(t *testing.T) {
+	for i := 0; i < 200; i++ {
+		svc, clock := newTestService(t)
+
+		if _, err := svc.Acquire("res", "a", 30); err != nil {
+			t.Fatalf("acquire a: %v", err)
+		}
+		if _, err := svc.Acquire("res", "b", 45); err != nil {
+			t.Fatalf("acquire b: %v", err)
+		}
+		clock.add(31 * time.Second)
+
+		canceled := make(chan error, 1)
+		swept := make(chan struct{}, 1)
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			_, err := svc.CancelWaiting("res", "b")
+			canceled <- err
+		}()
+		go func() {
+			defer wg.Done()
+			_, _ = svc.GetResource("res")
+			swept <- struct{}{}
+		}()
+		wg.Wait()
+		<-swept
+		err := <-canceled
+
+		view, _ := svc.GetResource("res")
+		switch {
+		case err == nil:
+			// Cancel won: the expired lease freed the resource without promoting b.
+			if view.Locked || view.OwnerID != "" {
+				t.Fatalf("iter %d: canceled waiter was promoted: %+v", i, view)
+			}
+			if len(view.Waiting) != 0 {
+				t.Fatalf("iter %d: waiting = %+v", i, view.Waiting)
+			}
+		case errors.Is(err, ErrNotWaiting):
+			// Transfer won: b holds the new lock and must not have lost it.
+			if view.OwnerID != "b" || !view.Locked {
+				t.Fatalf("iter %d: promoted holder lost the lock: %+v", i, view)
+			}
+		default:
+			t.Fatalf("iter %d: unexpected cancel error: %v", i, err)
+		}
 	}
 }

@@ -18,6 +18,8 @@ var (
 	ErrLeaseExpired          = base.ErrLeaseExpired
 	ErrDuplicateWaiter       = base.ErrDuplicateWaiter
 	ErrDuplicateHold         = base.ErrDuplicateHold
+	ErrResourceNotFound      = base.ErrResourceNotFound
+	ErrNotWaiting            = base.ErrNotWaiting
 
 	InvalidLeaseDurationError  = base.InvalidLeaseDurationError
 	InvalidReentryCountError   = base.InvalidReentryCountError
@@ -27,6 +29,8 @@ var (
 	LeaseExpiredError          = base.LeaseExpiredError
 	DuplicateWaiterError       = base.DuplicateWaiterError
 	DuplicateHoldError         = base.DuplicateHoldError
+	ResourceNotFoundError      = base.ResourceNotFoundError
+	NotWaitingError            = base.NotWaitingError
 )
 
 // Outcome status values.
@@ -37,6 +41,7 @@ const (
 	StatusReleased         = base.StatusReleased
 	StatusReentryDecrement = base.StatusReentryDecrement
 	StatusRenewed          = base.StatusRenewed
+	StatusCanceled         = base.StatusCanceled
 )
 
 // Types.
