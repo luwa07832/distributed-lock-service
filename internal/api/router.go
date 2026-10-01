@@ -30,6 +30,7 @@ func NewRouter(st *store.Store) *gin.Engine {
 		locks.POST("", acquireHandler(st))
 		locks.POST("/release", releaseHandler(st))
 		locks.POST("/reenter", reenterHandler(st))
+		locks.POST("/cancel-waiting", cancelWaitingHandler(st))
 		locks.GET("/:resourceId", stateHandler(st))
 	}
 
@@ -55,6 +56,8 @@ func mapStoreError(err error) (int, string, string) {
 		return http.StatusConflict, "LEASE_EXPIRED", "lease has expired"
 	case errors.Is(err, store.ErrDuplicateWaiting):
 		return http.StatusConflict, "DUPLICATE_WAITING", "owner already has a pending waiting request"
+	case errors.Is(err, store.ErrNotWaiting):
+		return http.StatusConflict, "NOT_WAITING", "caller is not a pending waiter for this resource"
 	default:
 		return http.StatusInternalServerError, "internal_error", "request failed"
 	}

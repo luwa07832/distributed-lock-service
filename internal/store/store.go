@@ -19,6 +19,7 @@ var (
 	ErrLeaseExpired       = errors.New("lease expired")
 	ErrNotOwner           = errors.New("not owner")
 	ErrDuplicateWaiting   = errors.New("duplicate waiting")
+	ErrNotWaiting         = errors.New("not waiting")
 	ErrInvalidLeaseSecond = errors.New("invalid lease seconds")
 )
 

@@ -84,6 +84,28 @@ go run .
 - `reentryCount` 大于 1 时，只把 `reentryCount` 减一并保留当前租约，不把释放传给其他等待者，返回 `REENTRY_DECREMENTED`。
 - 非持有者返回 `NOT_OWNER`；旧持有者在租约到期后调用返回 `LEASE_EXPIRED`，且不能影响新持有者。
 
+### `POST /locks/cancel-waiting`：撤销排队
+
+请求体只需要 `resourceId` 与 `ownerId`，供已经进入等待队列但尚未获得资源的调用者撤回排队：
+
+- 撤销只删除该等待请求，不释放当前持有者，不改变 `ownerId`、`leaseExpiresAt`、`reentryCount` 或租约期限，也不触发到期转移；其他等待者保持原顺序与各自的 `requestedLeaseSeconds`。
+- 成功返回 HTTP 200、`status` 为 `CANCELED`，`state` 沿用 `GET /locks/:resourceId` 的完整状态视图，其中不再包含被撤销的 `ownerId`。
+- 撤销后若资源仍被他人持有，再次 `POST /locks` 按既有语义进入当时队尾；若资源已无持有者，则直接获得锁。
+- 资源从未出现过时返回 `RESOURCE_NOT_FOUND`（HTTP 404）；资源存在但调用者不是未完成等待者（包括当前持有者、已被提升的等待者或重复撤销）时返回 `NOT_WAITING`（HTTP 409），重复撤销不改变持有者也不影响其他等待者。
+
+```json
+{
+  "status": "CANCELED",
+  "state": {
+    "resourceId": "doc-1",
+    "ownerId": "node-a",
+    "leaseExpiresAt": "2026-01-01T12:00:30.000Z",
+    "reentryCount": 1,
+    "waitingOwners": []
+  }
+}
+```
+
 ### `GET /locks/:resourceId`：持有状态查询
 
 只读，不延长租约、不改变队列、不触发解锁。固定包含 `resourceId`、`ownerId`、`leaseExpiresAt`、`reentryCount`、`waitingOwners`：
@@ -126,3 +148,4 @@ go run .
 | `NOT_OWNER` | 403 | 调用者不是当前持有者 |
 | `LEASE_EXPIRED` | 409 | 租约已到期，迟到操作被拒绝 |
 | `RESOURCE_NOT_FOUND` | 404 | 资源从未出现过 |
+| `NOT_WAITING` | 409 | 调用者不是该资源的未完成等待者 |
