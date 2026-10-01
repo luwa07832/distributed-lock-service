@@ -12,6 +12,7 @@ const (
 	StatusReleased         = "RELEASED"
 	StatusReentryDecrement = "REENTRY_DECREMENTED"
 	StatusRenewed          = "RENEWED"
+	StatusCanceled         = "CANCELED"
 )
 
 // Waiter is one queued request, in enqueue order.

@@ -109,6 +109,10 @@ func mapLockStateError(err error) (int, string, string) {
 		return http.StatusConflict, "DUPLICATE_WAITER", "owner already has a pending waiting request"
 	case errors.Is(err, locksvc.ErrDuplicateHold):
 		return http.StatusConflict, "DUPLICATE_HOLD", "owner already holds another resource"
+	case errors.Is(err, locksvc.ErrResourceNotFound):
+		return http.StatusNotFound, "RESOURCE_NOT_FOUND", "resource does not exist"
+	case errors.Is(err, locksvc.ErrNotWaiting):
+		return http.StatusConflict, "NOT_WAITING", "caller has no pending waiting request"
 	default:
 		return http.StatusInternalServerError, "internal_error", "request failed"
 	}
@@ -125,6 +129,11 @@ type lockIdentityRequest struct {
 	ResourceID   string `json:"resourceId"`
 	OwnerID      string `json:"ownerId"`
 	LeaseSeconds int64  `json:"leaseSeconds,omitempty"`
+}
+
+type cancelWaitingRequest struct {
+	ResourceID string `json:"resourceId"`
+	OwnerID    string `json:"ownerId"`
 }
 
 func registerLockStateRoutes(router *gin.Engine, svc *locksvc.Service) {
@@ -170,6 +179,20 @@ func registerLockStateRoutes(router *gin.Engine, svc *locksvc.Service) {
 
 	group.POST("/release", handleIdentity(svc.Release))
 	group.POST("/reenter", handleIdentity(svc.Reenter))
+	group.POST("/cancel-waiting", func(c *gin.Context) {
+		var req cancelWaitingRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			writeError(c, http.StatusBadRequest, "INVALID_REQUEST", "request body must be valid JSON")
+			return
+		}
+		outcome, err := svc.CancelWaiting(req.ResourceID, req.OwnerID)
+		if err != nil {
+			status, code, message := mapLockStateError(err)
+			writeError(c, status, code, message)
+			return
+		}
+		c.JSON(http.StatusOK, lockStateResponse{Status: outcome.Status, State: renderLockState(outcome.State)})
+	})
 
 	group.POST("/renew", func(c *gin.Context) {
 		var req lockIdentityRequest

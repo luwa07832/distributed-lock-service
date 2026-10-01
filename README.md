@@ -168,10 +168,11 @@ Go API 位于包 `github.com/luwa07832/distributed-lock-service/locksvc`（`inte
 - `Release(resourceId, ownerId string) (Outcome, error)`：仅当前持有者可释放，重入次数大于 1 时减一并保留租约，归零后才让给队首等待者（从转移时刻获得自己请求的新期限）；无等待者则记录删除、资源空闲。
 - `Reenter(resourceId, ownerId string) (Outcome, error)`：当前持有者增加一次重入，租约不变。
 - `Renew(resourceId, ownerId string, leaseSeconds int64) (Outcome, error)`：当前持有者从续期成功时刻起获得新期限。
+- `CancelWaiting(resourceId, ownerId string) (Outcome, error)`：撤销一个未完成排队请求，成功返回 `CANCELED`；资源从未出现返回 `ErrResourceNotFound`，调用者不是未完成等待者返回 `ErrNotWaiting`。
 - `GetResource(resourceId string) (ResourceState, error)`：返回锁是否存在（`Exists`）、是否被持有（`Locked`）、持有者、到期时刻、重入次数和等待者顺序；资源从未出现时返回空结果（`Exists=false`），不报错。
 - `GetHolder(ownerId string) (HolderState, error)`：返回该持有者当前占用的资源及其期限、到期时刻和重入次数；未占用任何资源时 `holds` 为空数组，不报错。
 
-错误哨兵同时提供两套名字：`InvalidLeaseDurationError`/`ErrInvalidLeaseDuration`、`InvalidReentryCountError`/`ErrInvalidReentryCount`、`InvalidLockIdentityError`/`ErrInvalidLockIdentity`、`InvalidHolderIdentityError`/`ErrInvalidHolderIdentity`、`NotLockOwnerError`/`ErrNotLockOwner`、`LeaseExpiredError`/`ErrLeaseExpired`、`DuplicateWaiterError`/`ErrDuplicateWaiter`、`DuplicateHoldError`/`ErrDuplicateHold`。
+错误哨兵同时提供两套名字：`InvalidLeaseDurationError`/`ErrInvalidLeaseDuration`、`InvalidReentryCountError`/`ErrInvalidReentryCount`、`InvalidLockIdentityError`/`ErrInvalidLockIdentity`、`InvalidHolderIdentityError`/`ErrInvalidHolderIdentity`、`NotLockOwnerError`/`ErrNotLockOwner`、`LeaseExpiredError`/`ErrLeaseExpired`、`DuplicateWaiterError`/`ErrDuplicateWaiter`、`DuplicateHoldError`/`ErrDuplicateHold`、`ResourceNotFoundError`/`ErrResourceNotFound`、`NotWaitingError`/`ErrNotWaiting`。
 
 ### `/v2/locks/*`：锁状态服务的 HTTP 入口
 
@@ -182,11 +183,12 @@ Go API 位于包 `github.com/luwa07832/distributed-lock-service/locksvc`（`inte
 | `/v2/locks/acquire` | POST | 请求体含 `resourceId`、`ownerId`、`leaseSeconds`，可选 `reentryCount`（新持有的初始重入次数，不能为负）。返回 `ACQUIRED`、`REENTRY` 或 `WAITING` |
 | `/v2/locks/release` | POST | 请求体含 `resourceId`、`ownerId`，返回 `REENTRY_DECREMENTED` 或 `RELEASED` |
 | `/v2/locks/reenter` | POST | 请求体含 `resourceId`、`ownerId`，成功返回 `REENTRY` |
+| `/v2/locks/cancel-waiting` | POST | 请求体含 `resourceId`、`ownerId`，成功返回 `CANCELED`；只删除该等待者，不改变持有者、租约和其他等待者 |
 | `/v2/locks/renew` | POST | 请求体含 `resourceId`、`ownerId`、`leaseSeconds`，成功返回 `RENEWED` |
 | `/v2/locks/resources/:resourceId` | GET | 查询单个资源，含 `exists`、`locked`、`ownerId`、`leaseExpiresAt`、`reentryCount`、`waitingOwners`；不存在返回 HTTP 200 空结果 |
 | `/v2/locks/holders/:ownerId` | GET | 查询持有者占用的资源：`{"ownerId":"...","holds":[{"resourceId","leaseSeconds","leaseExpiresAt","reentryCount"}]}` |
 
-同一持有者已经有效持有资源时，再次获取同一资源只会增加重入次数并返回原到期时刻；尝试在其他资源上建立持有（无论立即成功还是排队）返回 `DUPLICATE_HOLD`（HTTP 409），不会绕过重入计数。同一持有者对同一资源重复排队返回 `DUPLICATE_WAITER`（HTTP 409）。非持有者释放、重入或续期返回 `NOT_LOCK_OWNER`（HTTP 403）；旧持有者在租约到期后继续重入、释放或续期返回 `LEASE_EXPIRED`（HTTP 409）。
+同一持有者已经有效持有资源时，再次获取同一资源只会增加重入次数并返回原到期时刻；尝试在其他资源上建立持有（无论立即成功还是排队）返回 `DUPLICATE_HOLD`（HTTP 409），不会绕过重入计数。同一持有者对同一资源重复排队返回 `DUPLICATE_WAITER`（HTTP 409）。非持有者释放、重入或续期返回 `NOT_LOCK_OWNER`（HTTP 403）；旧持有者在租约到期后继续重入、释放或续期返回 `LEASE_EXPIRED`（HTTP 409）。撤销排队时，资源从未出现返回 `RESOURCE_NOT_FOUND`（HTTP 404），资源存在但调用者不是未完成等待者返回 `NOT_WAITING`（HTTP 409）。
 
 | code | HTTP | 含义 |
 |---|---|---|
@@ -198,5 +200,7 @@ Go API 位于包 `github.com/luwa07832/distributed-lock-service/locksvc`（`inte
 | `LEASE_EXPIRED` | 409 | 租约已到期，迟到操作被拒绝 |
 | `DUPLICATE_WAITER` | 409 | 同一持有者对同一资源重复排队 |
 | `DUPLICATE_HOLD` | 409 | 同一持有者已在其他资源上建立持有 |
+| `RESOURCE_NOT_FOUND` | 404 | 资源从未出现 |
+| `NOT_WAITING` | 409 | 调用者没有未完成的排队请求 |
 
 原有 `/locks` 入口、返回结构与获取、重入、释放语义保持不变，两套入口并存。

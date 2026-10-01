@@ -1,7 +1,9 @@
 package api
 
 import (
+	"bytes"
 	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"sync/atomic"
 	"testing"
@@ -231,5 +233,97 @@ func TestLockStateUnknownResourceReturnsEmptyResult(t *testing.T) {
 	holderBody := decode(t, holder)
 	if holderBody["holds"] == nil || len(holderBody["holds"].([]any)) != 0 {
 		t.Fatalf("holder body = %s", holder.Body.String())
+	}
+}
+
+func TestLockStateCancelWaiting(t *testing.T) {
+	router, _ := newLockStateRouter(t)
+
+	doJSON(t, router, http.MethodPost, "/v2/locks/acquire", map[string]any{
+		"resourceId": "r", "ownerId": "a", "leaseSeconds": 10,
+	})
+	doJSON(t, router, http.MethodPost, "/v2/locks/acquire", map[string]any{
+		"resourceId": "r", "ownerId": "b", "leaseSeconds": 20,
+	})
+	doJSON(t, router, http.MethodPost, "/v2/locks/acquire", map[string]any{
+		"resourceId": "r", "ownerId": "c", "leaseSeconds": 30,
+	})
+
+	canceled := doJSON(t, router, http.MethodPost, "/v2/locks/cancel-waiting", map[string]any{
+		"resourceId": "r", "ownerId": "b",
+	})
+	if canceled.Code != http.StatusOK {
+		t.Fatalf("cancel status = %d body = %s", canceled.Code, canceled.Body.String())
+	}
+	body := decode(t, canceled)
+	if body["status"] != "CANCELED" {
+		t.Fatalf("status = %v", body["status"])
+	}
+	state := body["state"].(map[string]any)
+	if state["exists"] != true || state["locked"] != true || state["ownerId"] != "a" {
+		t.Fatalf("state = %v", state)
+	}
+	waiters := state["waitingOwners"].([]any)
+	if len(waiters) != 1 {
+		t.Fatalf("waiters = %v", waiters)
+	}
+	remaining := waiters[0].(map[string]any)
+	if remaining["ownerId"] != "c" || remaining["requestedLeaseSeconds"].(float64) != 30 {
+		t.Fatalf("remaining waiter = %v", remaining)
+	}
+
+	query := decode(t, doJSON(t, router, http.MethodGet, "/v2/locks/resources/r", nil))
+	if query["ownerId"] != "a" {
+		t.Fatalf("query owner = %v", query["ownerId"])
+	}
+	queryWaiters := query["waitingOwners"].([]any)
+	if len(queryWaiters) != 1 || queryWaiters[0].(map[string]any)["ownerId"] != "c" {
+		t.Fatalf("query waiters = %v", queryWaiters)
+	}
+}
+
+func TestLockStateCancelWaitingErrors(t *testing.T) {
+	router, _ := newLockStateRouter(t)
+
+	doJSON(t, router, http.MethodPost, "/v2/locks/acquire", map[string]any{
+		"resourceId": "r", "ownerId": "a", "leaseSeconds": 10,
+	})
+	doJSON(t, router, http.MethodPost, "/v2/locks/acquire", map[string]any{
+		"resourceId": "r", "ownerId": "b", "leaseSeconds": 20,
+	})
+
+	cases := []struct {
+		name       string
+		body       map[string]any
+		wantStatus int
+		wantCode   string
+	}{
+		{"missing resource", map[string]any{"ownerId": "b"}, http.StatusBadRequest, "INVALID_LOCK_IDENTITY"},
+		{"missing owner", map[string]any{"resourceId": "r"}, http.StatusBadRequest, "INVALID_HOLDER_IDENTITY"},
+		{"unknown resource", map[string]any{"resourceId": "ghost", "ownerId": "b"}, http.StatusNotFound, "RESOURCE_NOT_FOUND"},
+		{"holder is not waiter", map[string]any{"resourceId": "r", "ownerId": "a"}, http.StatusConflict, "NOT_WAITING"},
+		{"unknown caller", map[string]any{"resourceId": "r", "ownerId": "z"}, http.StatusConflict, "NOT_WAITING"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			recorder := doJSON(t, router, http.MethodPost, "/v2/locks/cancel-waiting", tc.body)
+			if recorder.Code != tc.wantStatus || errorCode(recorder) != tc.wantCode {
+				t.Fatalf("response = %d %s", recorder.Code, recorder.Body.String())
+			}
+		})
+	}
+
+	invalid := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/v2/locks/cancel-waiting", bytes.NewBufferString(`{"resourceId":"r",`))
+	request.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(invalid, request)
+	if invalid.Code != http.StatusBadRequest || errorCode(invalid) != "INVALID_REQUEST" {
+		t.Fatalf("invalid JSON response = %d %s", invalid.Code, invalid.Body.String())
+	}
+
+	state := decode(t, doJSON(t, router, http.MethodGet, "/v2/locks/resources/r", nil))
+	waiters := state["waitingOwners"].([]any)
+	if len(waiters) != 1 || waiters[0].(map[string]any)["ownerId"] != "b" {
+		t.Fatalf("state changed after rejected cancellation: %v", state)
 	}
 }
