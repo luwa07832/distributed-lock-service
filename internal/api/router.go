@@ -12,10 +12,15 @@ import (
 
 // NewRouter wires the public HTTP surface. Every entry keeps the error shape in
 // README.md: one top-level "error" object with string "code" and "message".
-func NewRouter(st *store.Store) *gin.Engine {
+func NewRouter(st *store.Store, opts ...RouterOption) *gin.Engine {
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
 	router.Use(gin.Recovery())
+
+	cfg := routerConfig{}
+	for _, opt := range opts {
+		opt(&cfg)
+	}
 
 	router.GET("/healthz", func(c *gin.Context) {
 		if err := st.Ping(); err != nil {
@@ -32,6 +37,10 @@ func NewRouter(st *store.Store) *gin.Engine {
 		locks.POST("/reenter", reenterHandler(st))
 		locks.POST("/cancel-waiting", cancelWaitingHandler(st))
 		locks.GET("/:resourceId", stateHandler(st))
+	}
+
+	if cfg.lockStates != nil {
+		registerLockStateRoutes(router, cfg.lockStates)
 	}
 
 	router.NoRoute(func(c *gin.Context) {
