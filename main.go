@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/luwa07832/distributed-lock-service/internal/api"
+	"github.com/luwa07832/distributed-lock-service/internal/lockstate"
 	"github.com/luwa07832/distributed-lock-service/internal/store"
 )
 
@@ -25,7 +26,8 @@ func main() {
 	}
 	defer st.Close()
 
-	if err := api.NewRouter(st).Run(address); err != nil {
+	lockState := lockstate.NewService()
+	if err := api.NewRouter(st, lockState).Run(address); err != nil {
 		log.Fatalf("serve: %v", err)
 	}
 }

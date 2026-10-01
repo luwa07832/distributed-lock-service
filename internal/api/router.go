@@ -7,15 +7,25 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/luwa07832/distributed-lock-service/internal/lockstate"
 	"github.com/luwa07832/distributed-lock-service/internal/store"
 )
 
 // NewRouter wires the public HTTP surface. Every entry keeps the error shape in
 // README.md: one top-level "error" object with string "code" and "message".
-func NewRouter(st *store.Store) *gin.Engine {
+//
+// The queryable lock-state service is mounted alongside the persistent lock
+// entries under /lock-state. Callers may pass a prepared service to share one
+// across routers; otherwise a fresh in-memory service is created.
+func NewRouter(st *store.Store, lockStates ...*lockstate.Service) *gin.Engine {
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
 	router.Use(gin.Recovery())
+
+	lockStateService := lockstate.NewService()
+	if len(lockStates) > 0 && lockStates[0] != nil {
+		lockStateService = lockStates[0]
+	}
 
 	router.GET("/healthz", func(c *gin.Context) {
 		if err := st.Ping(); err != nil {
@@ -32,6 +42,16 @@ func NewRouter(st *store.Store) *gin.Engine {
 		locks.POST("/reenter", reenterHandler(st))
 		locks.POST("/cancel-waiting", cancelWaitingHandler(st))
 		locks.GET("/:resourceId", stateHandler(st))
+	}
+
+	lockState := router.Group("/lock-state")
+	{
+		lockState.POST("/locks", lockStateAcquireHandler(lockStateService))
+		lockState.POST("/locks/reenter", lockStateReenterHandler(lockStateService))
+		lockState.POST("/locks/release", lockStateReleaseHandler(lockStateService))
+		lockState.POST("/locks/renew", lockStateRenewHandler(lockStateService))
+		lockState.GET("/locks/:resourceId", lockStateResourceHandler(lockStateService))
+		lockState.GET("/holders/:holderId", lockStateHolderHandler(lockStateService))
 	}
 
 	router.NoRoute(func(c *gin.Context) {
