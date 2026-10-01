@@ -160,3 +160,29 @@ func stateHandler(st *store.Store) gin.HandlerFunc {
 		c.JSON(http.StatusOK, renderState(state))
 	}
 }
+
+func cancelWaitingHandler(st *store.Store) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var req ownerRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			writeError(c, http.StatusBadRequest, "INVALID_REQUEST", "request body must be valid JSON")
+			return
+		}
+		if req.ResourceID == "" {
+			writeError(c, http.StatusBadRequest, "MISSING_RESOURCE_ID", "resourceId is required")
+			return
+		}
+		if req.OwnerID == "" {
+			writeError(c, http.StatusBadRequest, "MISSING_OWNER_ID", "ownerId is required")
+			return
+		}
+
+		outcome, err := st.CancelWaiting(req.ResourceID, req.OwnerID)
+		if err != nil {
+			status, code, message := mapStoreError(err)
+			writeError(c, status, code, message)
+			return
+		}
+		c.JSON(http.StatusOK, stateResponse{Status: outcome.Status, State: renderState(outcome.State)})
+	}
+}

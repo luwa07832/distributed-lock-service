@@ -12,6 +12,7 @@ const (
 	StatusWaiting          = "WAITING"
 	StatusReleased         = "RELEASED"
 	StatusReentryDecrement = "REENTRY_DECREMENTED"
+	StatusCanceled         = "CANCELED"
 )
 
 // resourceRow is the mutable state of one resource row.
